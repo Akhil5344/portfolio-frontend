@@ -1,0 +1,49 @@
+steps:
+# 1. Install dependencies and build static assets
+- name: 'node:20' # Use a standard Node image for frontend tasks
+  id: Build Frontend Assets
+  entrypoint: 'npm'
+  args: ['install']
+- name: 'node:20'
+  entrypoint: 'npm'
+  args: ['run', 'build'] # This creates the final static files (e.g., in a 'build' folder)
+
+# 2. Build the Docker image
+# NOTE: The Dockerfile must use a multi-stage build or copy assets from the build step.
+- name: 'gcr.io/cloud-builders/docker'
+  id: Build Image
+  args:
+  - 'build'
+  - '-t'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/microservices-repo/portfolio-frontend:$COMMIT_SHA'
+  - '.'
+
+# 3. Push the Docker image to Artifact Registry
+- name: 'gcr.io/cloud-builders/docker'
+  id: Push Image
+  args:
+  - 'push'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/microservices-repo/portfolio-frontend:$COMMIT_SHA'
+
+# 4. Substitute the image tag in the Kubernetes manifest
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: Update K8s Manifest
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  # Replaces the placeholder image tag in the frontend deployment file
+  - |
+    sed -i "s|gcr.io/[PROJECT_ID]/portfolio-frontend:latest|us-central1-docker.pkg.dev/$PROJECT_ID/microservices-repo/portfolio-frontend:$COMMIT_SHA|g" k8s/portfolio-frontend.yaml
+    
+# 5. Apply the updated manifest to the GKE cluster
+- name: 'gcr.io/cloud-builders/kubectl'
+  id: Deploy to GKE
+  args:
+  - 'apply'
+  - '-f'
+  - 'k8s/portfolio-frontend.yaml'
+  - '--cluster=portfolio-cluster'
+  - '--zone=us-central1-a'
+env:
+- 'CLOUDSDK_COMPUTE_ZONE=us-central1-a'
+- 'CLOUDSDK_CONTAINER_CLUSTER=portfolio-cluster'
